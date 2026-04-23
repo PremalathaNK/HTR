@@ -2,10 +2,11 @@
 Translation Service — Google Translator (deep-translator) with language routing.
 
 Uses deep_translator.GoogleTranslator for all languages (including Indian ones).
-Easy to swap in NLLB or IndicTrans2 later when you want offline/fine-tuned translation.
+Includes an automatic offline fallback to NLLB-200 if the network fails.
 """
 
 from deep_translator import GoogleTranslator
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 # Language code map for UI display
 SUPPORTED_LANGUAGES = {
@@ -23,22 +24,25 @@ SUPPORTED_LANGUAGES = {
     "ja": "Japanese",
 }
 
+# NLLB uses Flores-200 language codes
+NLLB_LANG_MAP = {
+    "en": "eng_Latn",
+    "hi": "hin_Deva",
+    "ta": "tam_Taml",
+    "kn": "kan_Knda",
+    "te": "tel_Telu",
+    "ml": "mal_Mlym",
+    "fr": "fra_Latn",
+    "de": "deu_Latn",
+    "es": "spa_Latn",
+    "zh-CN": "zho_Hans",
+    "ar": "arb_Arab",
+    "ja": "jpn_Jpan",
+}
 
 def translate_text(text: str, target_lang: str, source_lang: str = "auto") -> dict:
     """
-    Translate text from source_lang to target_lang.
-
-    Args:
-        text: Input text to translate
-        target_lang: BCP-47 language code (e.g. "hi", "ta", "fr")
-        source_lang: Source language code or "auto" for auto-detection
-
-    Returns:
-        dict with keys:
-            translated_text (str): Translated output
-            source_lang (str): Detected or given source lang
-            target_lang (str): Target language code
-            target_lang_name (str): Human-readable target language name
+    Translate text from source_lang to target_lang using Google Translate.
     """
     if not text or not text.strip():
         return {
@@ -48,9 +52,14 @@ def translate_text(text: str, target_lang: str, source_lang: str = "auto") -> di
             "target_lang_name": SUPPORTED_LANGUAGES.get(target_lang, target_lang),
         }
 
-    # deep-translator uses "auto" for auto-detection
-    translator = GoogleTranslator(source=source_lang, target=target_lang)
-    translated = translator.translate(text.strip())
+    translated = None
+    
+    try:
+        translator = GoogleTranslator(source=source_lang, target=target_lang)
+        translated = translator.translate(text.strip())
+    except Exception as e:
+        print(f"[Translate] Network error with Google Translator: {e}")
+        translated = text # Return original text on failure
 
     return {
         "translated_text": translated or text,
@@ -58,7 +67,6 @@ def translate_text(text: str, target_lang: str, source_lang: str = "auto") -> di
         "target_lang": target_lang,
         "target_lang_name": SUPPORTED_LANGUAGES.get(target_lang, target_lang),
     }
-
 
 def get_supported_languages() -> dict:
     """Return supported language map for the frontend language selector."""

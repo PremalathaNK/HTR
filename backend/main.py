@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image
@@ -183,12 +184,15 @@ async def extract_text(
 
         preprocessing_meta = {}
         if preprocess:
-            pre_result = preprocess_image(pil_image)
+            # Fix: Pass the correct pre-processing mode so TrOCR gets adaptive thresholding!
+            pre_mode = "trocr" if model_choice == "trocr-handwritten" else "easyocr"
+            pre_result = preprocess_image(pil_image, mode=pre_mode)
             pil_image = pre_result["processed_image"]
             preprocessing_meta = {
                 "quality_score": pre_result["quality_score"],
                 "is_blurry": pre_result["is_blurry"],
                 "skew_corrected": pre_result["skew_corrected"],
+                "mode": pre_result["mode"],
             }
 
         valid_choices = ["easyocr", "trocr-handwritten"]
@@ -198,7 +202,7 @@ async def extract_text(
                 detail=f"Invalid model_choice. Must be one of: {valid_choices}"
             )
 
-        ocr_result = run_ocr(pil_image, model_choice=model_choice)
+        ocr_result = await run_in_threadpool(run_ocr, pil_image, model_choice=model_choice)
 
         session = {
             "image_id": image_id,
@@ -239,14 +243,17 @@ async def translate_and_tts(
         raise HTTPException(status_code=400, detail="Empty text provided.")
 
     try:
-        trans_result = translate_text(
+        trans_result = await run_in_threadpool(
+            translate_text,
             text=text,
             target_lang=target_language,
             source_lang=source_language,
         )
         translated = trans_result["translated_text"]
 
-        tts_result = synthesize_speech(text=translated, lang=target_language)
+        tts_result = await run_in_threadpool(
+            synthesize_speech, text=translated, lang=target_language
+        )
 
         return {
             "translated_text": translated,

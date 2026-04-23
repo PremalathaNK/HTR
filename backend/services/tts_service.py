@@ -71,6 +71,7 @@ def _estimate_word_timestamps(words: list[str], lang: str) -> list[dict]:
 def synthesize_speech(text: str, lang: str = "en") -> dict:
     """
     Convert text to speech using gTTS and return base64 audio + word timestamps.
+    If the network fails, automatically falls back to offline pyttsx3.
 
     Args:
         text: Input text to convert to speech
@@ -78,7 +79,7 @@ def synthesize_speech(text: str, lang: str = "en") -> dict:
 
     Returns:
         dict with:
-            audio_base64 (str): Base64-encoded MP3 data
+            audio_base64 (str): Base64-encoded MP3/WAV data
             word_timestamps (list): [{word, start_ms, end_ms}, ...]
             duration_estimate_ms (int): Total estimated audio duration
             lang (str): Language used
@@ -93,14 +94,42 @@ def synthesize_speech(text: str, lang: str = "en") -> dict:
 
     gtts_lang = _get_gtts_lang(lang)
     words = text.strip().split()
+    audio_base64 = ""
 
-    # Generate TTS audio
-    tts = gTTS(text=text.strip(), lang=gtts_lang, slow=False)
-    audio_buffer = io.BytesIO()
-    tts.write_to_fp(audio_buffer)
-    audio_buffer.seek(0)
+    # 1. Try Online TTS
+    try:
+        tts = gTTS(text=text.strip(), lang=gtts_lang, slow=False)
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        audio_base64 = base64.b64encode(audio_buffer.read()).decode("utf-8")
+    except Exception as e:
+        print(f"[TTS] Network error with gTTS: {e}. Falling back to offline pyttsx3.")
 
-    audio_base64 = base64.b64encode(audio_buffer.read()).decode("utf-8")
+    # 2. Fallback to Offline TTS if Online Failed
+    if not audio_base64:
+        try:
+            import pyttsx3
+            import tempfile
+            import os
+            
+            engine = pyttsx3.init()
+            # Try to match the speaking rate so our word timestamps stay somewhat accurate
+            engine.setProperty('rate', 150)
+            
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                tmp_path = f.name
+            
+            engine.save_to_file(text.strip(), tmp_path)
+            engine.runAndWait()
+            
+            with open(tmp_path, "rb") as f:
+                audio_base64 = base64.b64encode(f.read()).decode("utf-8")
+                
+            os.remove(tmp_path)
+        except Exception as e:
+            print(f"[TTS] Offline fallback also failed: {e}")
+
     timestamps = _estimate_word_timestamps(words, lang)
     duration_ms = timestamps[-1]["end_ms"] + 300 if timestamps else 0
 
