@@ -182,27 +182,40 @@ async def extract_text(
         # Load image
         pil_image = bytes_to_pil(contents)
 
-        preprocessing_meta = {}
-        if preprocess:
-            # Fix: Pass the correct pre-processing mode so TrOCR gets adaptive thresholding!
-            pre_mode = "trocr" if model_choice == "trocr-handwritten" else "easyocr"
-            pre_result = preprocess_image(pil_image, mode=pre_mode)
-            pil_image = pre_result["processed_image"]
-            preprocessing_meta = {
-                "quality_score": pre_result["quality_score"],
-                "is_blurry": pre_result["is_blurry"],
-                "skew_corrected": pre_result["skew_corrected"],
-                "mode": pre_result["mode"],
-            }
-
-        valid_choices = ["easyocr", "trocr-handwritten"]
+        valid_choices = ["easyocr", "trocr-handwritten", "auto"]
         if model_choice not in valid_choices:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid model_choice. Must be one of: {valid_choices}"
             )
 
-        ocr_result = await run_in_threadpool(run_ocr, pil_image, model_choice=model_choice)
+        async def run_pipeline(m_choice: str):
+            img = pil_image
+            p_meta = {}
+            if preprocess:
+                pre_mode = "trocr" if m_choice == "trocr-handwritten" else "easyocr"
+                pre_result = preprocess_image(img, mode=pre_mode)
+                img = pre_result["processed_image"]
+                p_meta = {
+                    "quality_score": pre_result["quality_score"],
+                    "is_blurry": pre_result["is_blurry"],
+                    "skew_corrected": pre_result["skew_corrected"],
+                    "mode": pre_result["mode"],
+                }
+            result = await run_in_threadpool(run_ocr, img, model_choice=m_choice)
+            return result, p_meta
+
+        if model_choice == "auto":
+            res_easy, meta_easy = await run_pipeline("easyocr")
+            res_trocr, meta_trocr = await run_pipeline("trocr-handwritten")
+            if res_trocr["sequence_confidence"] > res_easy["sequence_confidence"]:
+                ocr_result = res_trocr
+                preprocessing_meta = meta_trocr
+            else:
+                ocr_result = res_easy
+                preprocessing_meta = meta_easy
+        else:
+            ocr_result, preprocessing_meta = await run_pipeline(model_choice)
 
         session = {
             "image_id": image_id,

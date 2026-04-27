@@ -502,7 +502,7 @@ export default function App() {
   const [imageHash, setImageHash] = useState('');
   const [ocrResult, setOcrResult] = useState(null);
   const [editedText, setEditedText] = useState('');
-  const [selectedModel, setSelectedModel] = useState('easyocr');
+  const [selectedModel, setSelectedModel] = useState('auto');
   const [isOcring, setIsOcring] = useState(false);
 
   // Translation + TTS
@@ -902,6 +902,7 @@ export default function App() {
                   value={selectedModel}
                   onChange={e => setSelectedModel(e.target.value)}
                 >
+                  <option value="auto">🤖 Auto — Automatically choose best model</option>
                   <option value="easyocr">⚡ EasyOCR — Best for printed / mixed text</option>
                   <option value="trocr-handwritten">✍ TrOCR Handwritten — Best for cursive</option>
                 </select>
@@ -909,6 +910,7 @@ export default function App() {
               </div>
               <p className="field-hint">
                 <Info size={11} />
+                {selectedModel === 'auto' && 'Automatically determines handwritten vs printed and uses the best model.'}
                 {selectedModel === 'easyocr' && 'Best overall speed+accuracy for mixed/printed text.'}
                 {selectedModel === 'trocr-handwritten' && 'Microsoft TrOCR fine-tuned on handwriting datasets.'}
               </p>
